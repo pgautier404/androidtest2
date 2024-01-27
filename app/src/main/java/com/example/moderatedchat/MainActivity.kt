@@ -26,6 +26,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -36,6 +37,7 @@ import com.example.moderatedchat.ui.theme.ModeratedChatTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONObject
@@ -122,6 +124,7 @@ fun ModeratedChatLayout(
             messages = currentMessages,
             onMessagesLoad = {
                 currentMessages = it
+                println("messages changed to $currentMessages")
             }
         )
     }
@@ -134,11 +137,18 @@ fun MessageList(
     onMessagesLoad: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
-//    LaunchedEffect(messages) {
-//        withContext(Dispatchers.IO) {
-//            onMessagesLoad(getMessagesForLanguage(language))
-//        }
-//    }
+    println("---> MessagesList with lang $language and messages: $messages")
+    if (language != "xx") {
+        LaunchedEffect(language) {
+            println("IN LAUNCHED EFFECT")
+            withContext(Dispatchers.IO) {
+                // onMessagesLoad(getMessagesForLanguage(language))
+                onMessagesLoad("messages for $language")
+            }
+        }
+    } else {
+        println("!!! skipping message load for $language")
+    }
     Box(
         modifier = modifier
             .fillMaxHeight()
@@ -147,9 +157,10 @@ fun MessageList(
             .padding(4.dp)
     ) {
         Text(
-            text = messages
+           text = messages
         )
     }
+    println("---> Exiting MessagesList")
 }
 
 @Composable
@@ -271,7 +282,10 @@ private fun getSupportedLanguages(): HashMap<String, String> {
 }
 
 private fun getMessagesForLanguage(languageCode: String): String {
+    println("Getting messages for $languageCode")
     val apiUrl = "$baseApiUrl/v1/translate/latestMessages/$languageCode"
+    println(apiUrl)
     val json = URL(apiUrl).readText()
+    println("got $json")
     return json
 }
