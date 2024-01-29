@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.wrapContentSize
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material3.Button
@@ -21,23 +22,23 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextField
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.example.moderatedchat.ui.theme.ModeratedChatTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONObject
@@ -51,13 +52,14 @@ import java.io.InputStreamReader
 import java.io.OutputStreamWriter
 import java.net.URL
 import java.net.URLEncoder
-import java.util.HashMap
 import java.util.UUID
 import javax.net.ssl.HttpsURLConnection
+import kotlin.collections.HashMap
 
 const val baseApiUrl = "https://57zovcekn0.execute-api.us-west-2.amazonaws.com/prod"
 var momentoApiToken: String = ""
 var tokenExpiresAt: Int = 0
+var topicPublishClient: TopicClient? = null
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -76,33 +78,54 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+data class ChatUser(val name: String, val id: UUID)
+
+data class ChatMessage(
+    val timestamp: Int,
+    val messageType: String,
+    val message: String,
+    val sourceLanguage: String,
+    val user: ChatUser
+)
+
 @Composable
 fun ModeratedChatApp(name: String, modifier: Modifier = Modifier) {
+    val userId = UUID.randomUUID()
     LaunchedEffect(name) {
         withContext(Dispatchers.IO) {
             coroutineScope {
-                launch { getApiToken(name) }
+                launch { getApiToken(name, userId) }
             }
             val credentialProvider = CredentialProvider.fromString(momentoApiToken)
             val topicClient = TopicClient(
                 credentialProvider = credentialProvider,
                 configuration = TopicConfigurations.Laptop.latest
             )
-            launch { topicSubscribe(topicClient) }
+            coroutineScope {
+                launch { topicSubscribe(topicClient) }
+            }
+            topicPublishClient = topicClient
         }
     }
     ModeratedChatLayout(
+        userName = name,
+        userId = userId,
+        topicClient = topicPublishClient,
         modifier = modifier
     )
 }
 
 @Composable
 fun ModeratedChatLayout(
+    userName: String,
+    userId: UUID,
+    topicClient: TopicClient?,
     modifier: Modifier = Modifier
 ) {
     var supportedLanguages by remember { mutableStateOf(mapOf("xx" to "Loading...")) }
     var currentLanguage by remember { mutableStateOf("xx") }
     var currentMessages by remember { mutableStateOf("Waiting for messages...")}
+    var chatMessage by remember{ mutableStateOf("") }
     Column(
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally
@@ -119,13 +142,37 @@ fun ModeratedChatLayout(
             },
             modifier = modifier.fillMaxWidth()
         )
+        TextField(
+            value = chatMessage,
+            onValueChange = { chatMessage = it },
+            label = { Text("Type your message . . .") },
+            singleLine = true,
+            keyboardOptions = KeyboardOptions.Default.copy(
+                keyboardType = KeyboardType.Text,
+                imeAction = ImeAction.Done
+            ),
+            modifier = Modifier
+                .fillMaxWidth()
+        )
+        Button(
+            onClick = {
+                println("sending message $chatMessage")
+                if (topicClient != null) {
+
+                }
+                chatMessage = ""
+            }
+        ) {
+            Text(text = "Send")
+        }
         MessageList(
             language = currentLanguage,
             messages = currentMessages,
             onMessagesLoad = {
                 currentMessages = it
                 println("messages changed to $currentMessages")
-            }
+            },
+//            modifier = Modifier.fillMaxSize()
         )
     }
 }
@@ -142,6 +189,7 @@ fun MessageList(
         LaunchedEffect(language) {
             println("IN LAUNCHED EFFECT")
             withContext(Dispatchers.IO) {
+                getMessagesForLanguage(language)
                 // onMessagesLoad(getMessagesForLanguage(language))
                 onMessagesLoad("messages for $language")
             }
@@ -238,9 +286,8 @@ suspend fun topicSubscribe(topicClient: TopicClient) {
     }
 }
 
-private fun getApiToken(username: String) {
+private fun getApiToken(username: String, id: UUID) {
     val apiUrl = "$baseApiUrl/v1/translate/token"
-    val id = UUID.randomUUID()
     var reqParams = URLEncoder.encode("username", "UTF-8") + "=" + URLEncoder.encode(username, "UTF-8")
     reqParams += "&" + URLEncoder.encode("id", "UTF-8") + "=" + URLEncoder.encode(id.toString(), "UTF-8")
     val url = URL(apiUrl)
