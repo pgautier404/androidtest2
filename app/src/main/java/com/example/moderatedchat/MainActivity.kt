@@ -138,6 +138,8 @@ fun ModeratedChatLayout(
             onLanguageChange = {
                 currentLanguage = it
                 println("language changed to $currentLanguage")
+                currentMessages = getMessagesForLanguage(currentLanguage)
+                print("messages changed to $currentMessages")
             },
             modifier = modifier.fillMaxWidth()
         )
@@ -178,10 +180,6 @@ fun ModeratedChatLayout(
         MessageList(
             language = currentLanguage,
             messages = currentMessages,
-            onMessagesLoad = {
-                currentMessages = it
-                println("messages changed to $currentMessages")
-            },
             modifier = Modifier.fillMaxSize()
         )
     }
@@ -191,22 +189,9 @@ fun ModeratedChatLayout(
 fun MessageList(
     language: String,
     messages: String,
-    onMessagesLoad: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
     println("---> MessagesList with lang $language and messages: $messages")
-    if (language != "xx") {
-        LaunchedEffect(language) {
-            println("IN LAUNCHED EFFECT")
-            withContext(Dispatchers.IO) {
-                getMessagesForLanguage(language)
-                // onMessagesLoad(getMessagesForLanguage(language))
-                onMessagesLoad("messages for $language")
-            }
-        }
-    } else {
-        println("!!! skipping message load for $language")
-    }
     Box(
         modifier = modifier
             .fillMaxHeight()
@@ -215,7 +200,8 @@ fun MessageList(
             .padding(4.dp)
     ) {
         Text(
-           text = messages
+//            text = messages
+            text = "messages for $language"
         )
     }
     println("---> Exiting MessagesList")
@@ -272,6 +258,7 @@ fun LanguageDropdown(
 
 
 suspend fun topicSubscribe(topicClient: TopicClient) {
+    // TODO: changing languages should resubscribe
     when (val response = topicClient.subscribe("moderator", "chat-en")) {
         is TopicSubscribeResponse.Subscription -> coroutineScope {
             launch {
@@ -342,9 +329,7 @@ private fun getMessagesForLanguage(languageCode: String): String {
     println("Getting messages for $languageCode")
     val apiUrl = "$baseApiUrl/v1/translate/latestMessages/$languageCode"
     println(apiUrl)
-    val json = URL(apiUrl).readText()
-    println("got $json")
-    return json
+    return URL(apiUrl).readText()
 }
 
 private suspend fun publishMessage(
@@ -354,6 +339,7 @@ private suspend fun publishMessage(
     chatMessage: String,
 ) {
     val credentialProvider = CredentialProvider.fromString(momentoApiToken)
+    // TODO: it would be nice to, uh, not do this
     val topicClient = TopicClient(
         credentialProvider = credentialProvider,
         configuration = TopicConfigurations.Laptop.latest
