@@ -28,6 +28,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -36,6 +37,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.example.moderatedchat.ui.theme.ModeratedChatTheme
+import com.google.gson.Gson
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
@@ -59,7 +61,6 @@ import kotlin.collections.HashMap
 const val baseApiUrl = "https://57zovcekn0.execute-api.us-west-2.amazonaws.com/prod"
 var momentoApiToken: String = ""
 var tokenExpiresAt: Int = 0
-var topicPublishClient: TopicClient? = null
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -81,7 +82,7 @@ class MainActivity : ComponentActivity() {
 data class ChatUser(val name: String, val id: UUID)
 
 data class ChatMessage(
-    val timestamp: Int,
+    val timestamp: Long,
     val messageType: String,
     val message: String,
     val sourceLanguage: String,
@@ -104,13 +105,11 @@ fun ModeratedChatApp(name: String, modifier: Modifier = Modifier) {
             coroutineScope {
                 launch { topicSubscribe(topicClient) }
             }
-            topicPublishClient = topicClient
         }
     }
     ModeratedChatLayout(
         userName = name,
         userId = userId,
-        topicClient = topicPublishClient,
         modifier = modifier
     )
 }
@@ -119,13 +118,13 @@ fun ModeratedChatApp(name: String, modifier: Modifier = Modifier) {
 fun ModeratedChatLayout(
     userName: String,
     userId: UUID,
-    topicClient: TopicClient?,
     modifier: Modifier = Modifier
 ) {
     var supportedLanguages by remember { mutableStateOf(mapOf("xx" to "Loading...")) }
     var currentLanguage by remember { mutableStateOf("xx") }
     var currentMessages by remember { mutableStateOf("Waiting for messages...")}
     var chatMessage by remember{ mutableStateOf("") }
+    val scope = rememberCoroutineScope()
     Column(
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally
@@ -156,9 +155,20 @@ fun ModeratedChatLayout(
         )
         Button(
             onClick = {
+                if (chatMessage.isEmpty()) {
+                    return@Button
+                }
                 println("sending message $chatMessage")
-                if (topicClient != null) {
-
+                // copy message and language values to send to publish
+                val publishMessage = chatMessage
+                val publishLanguage = currentLanguage
+                scope.launch {
+                    publishMessage(
+                        userName = userName,
+                        userId = userId,
+                        currentLanguage = publishLanguage,
+                        chatMessage = publishMessage
+                    )
                 }
                 chatMessage = ""
             }
@@ -172,7 +182,7 @@ fun ModeratedChatLayout(
                 currentMessages = it
                 println("messages changed to $currentMessages")
             },
-//            modifier = Modifier.fillMaxSize()
+            modifier = Modifier.fillMaxSize()
         )
     }
 }
@@ -335,4 +345,37 @@ private fun getMessagesForLanguage(languageCode: String): String {
     val json = URL(apiUrl).readText()
     println("got $json")
     return json
+}
+
+private suspend fun publishMessage(
+    userName: String,
+    userId: UUID,
+    currentLanguage: String,
+    chatMessage: String,
+) {
+    val credentialProvider = CredentialProvider.fromString(momentoApiToken)
+    val topicClient = TopicClient(
+        credentialProvider = credentialProvider,
+        configuration = TopicConfigurations.Laptop.latest
+    )
+    println("got client for publish: $topicClient")
+    println("chat message is $chatMessage")
+    val gson = Gson()
+    val user = ChatUser(name = userName, id = userId)
+    val message = ChatMessage(
+        timestamp = System.currentTimeMillis(),
+        message = chatMessage,
+        messageType = "text",
+        sourceLanguage = currentLanguage,
+        user = user
+    )
+    val jsonMessage = gson.toJson(message)
+    println("sending json message: $jsonMessage")
+    val publishResponse = topicClient.publish(
+        cacheName = "moderator",
+        topicName = "chat-publish",
+        value = jsonMessage
+    )
+    println("publish response is $publishResponse")
+    topicClient.close()
 }
