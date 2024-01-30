@@ -7,7 +7,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -61,6 +60,8 @@ import kotlin.collections.HashMap
 const val baseApiUrl = "https://57zovcekn0.execute-api.us-west-2.amazonaws.com/prod"
 var momentoApiToken: String = ""
 var tokenExpiresAt: Int = 0
+// TODO: I really doubt this is right
+var topicClient: TopicClient? = null
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -98,12 +99,12 @@ fun ModeratedChatApp(name: String, modifier: Modifier = Modifier) {
                 launch { getApiToken(name, userId) }
             }
             val credentialProvider = CredentialProvider.fromString(momentoApiToken)
-            val topicClient = TopicClient(
+            topicClient = TopicClient(
                 credentialProvider = credentialProvider,
                 configuration = TopicConfigurations.Laptop.latest
             )
             coroutineScope {
-                launch { topicSubscribe(topicClient) }
+                launch { topicSubscribe(topicClient!!) }
             }
         }
     }
@@ -136,10 +137,14 @@ fun ModeratedChatLayout(
             },
             language = currentLanguage,
             onLanguageChange = {
-                currentLanguage = it
-                println("language changed to $currentLanguage")
-                currentMessages = getMessagesForLanguage(currentLanguage)
-                print("messages changed to $currentMessages")
+                scope.launch {
+                    withContext(Dispatchers.IO) {
+                        currentLanguage = it
+                        println("language changed to $currentLanguage")
+                        currentMessages = getMessagesForLanguage(currentLanguage)
+                        print("messages changed to $currentMessages")
+                    }
+                }
             },
             modifier = modifier.fillMaxWidth()
         )
@@ -178,7 +183,6 @@ fun ModeratedChatLayout(
             Text(text = "Send")
         }
         MessageList(
-            language = currentLanguage,
             messages = currentMessages,
             modifier = Modifier.fillMaxSize()
         )
@@ -187,21 +191,26 @@ fun ModeratedChatLayout(
 
 @Composable
 fun MessageList(
-    language: String,
     messages: String,
     modifier: Modifier = Modifier
 ) {
-    println("---> MessagesList with lang $language and messages: $messages")
-    Box(
+    println("---> MessagesList with messages: $messages")
+    var charsToShow = 1000
+    if (messages.length < charsToShow) {
+        charsToShow = messages.length - 1
+    }
+    Column(
         modifier = modifier
-            .fillMaxHeight()
+            .fillMaxSize()
             .wrapContentSize(align = Alignment.Center)
             .background(color = Color.Green)
             .padding(4.dp)
     ) {
         Text(
+            // TODO: this causes the app to crash 100% of the time
 //            text = messages
-            text = "messages for $language"
+            // TODO: however, this works 100% of the time
+            text = messages.substring(0 .. charsToShow)
         )
     }
     println("---> Exiting MessagesList")
@@ -338,13 +347,9 @@ private suspend fun publishMessage(
     currentLanguage: String,
     chatMessage: String,
 ) {
-    val credentialProvider = CredentialProvider.fromString(momentoApiToken)
-    // TODO: it would be nice to, uh, not do this
-    val topicClient = TopicClient(
-        credentialProvider = credentialProvider,
-        configuration = TopicConfigurations.Laptop.latest
-    )
-    println("got client for publish: $topicClient")
+    if (topicClient === null) {
+        println("Skipping publish because topic client is null")
+    }
     println("chat message is $chatMessage")
     val gson = Gson()
     val user = ChatUser(name = userName, id = userId)
@@ -357,11 +362,10 @@ private suspend fun publishMessage(
     )
     val jsonMessage = gson.toJson(message)
     println("sending json message: $jsonMessage")
-    val publishResponse = topicClient.publish(
+    val publishResponse = topicClient!!.publish(
         cacheName = "moderator",
         topicName = "chat-publish",
         value = jsonMessage
     )
     println("publish response is $publishResponse")
-    topicClient.close()
 }
