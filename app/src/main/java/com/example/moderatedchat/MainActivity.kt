@@ -62,7 +62,7 @@ import kotlin.collections.HashMap
 
 const val baseApiUrl = "https://57zovcekn0.execute-api.us-west-2.amazonaws.com/prod"
 var momentoApiToken: String = ""
-var tokenExpiresAt: Int = 0
+var tokenExpiresAt: Long = 0
 // TODO: I really doubt this is right
 var topicClient: TopicClient? = null
 
@@ -83,7 +83,10 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-data class ChatUser(val name: String, val id: UUID)
+data class ChatUser(
+    val name: String,
+    val id: String
+)
 
 data class ChatMessage(
     val timestamp: Long,
@@ -96,23 +99,6 @@ data class ChatMessage(
 @Composable
 fun ModeratedChatApp(name: String, modifier: Modifier = Modifier) {
     val userId = UUID.randomUUID()
-    LaunchedEffect(name) {
-        withContext(Dispatchers.IO) {
-            coroutineScope {
-                launch { getApiToken(name, userId) }
-            }
-            val credentialProvider = CredentialProvider.fromString(momentoApiToken)
-            topicClient = TopicClient(
-                credentialProvider = credentialProvider,
-                configuration = TopicConfigurations.Laptop.latest
-            )
-            // TODO: need to move this to the layout so it can accept a callback
-            //  for modifying currentMessages there . . .
-            coroutineScope {
-                launch { topicSubscribe(topicClient!!) }
-            }
-        }
-    }
     ModeratedChatLayout(
         userName = name,
         userId = userId,
@@ -133,7 +119,7 @@ fun ModeratedChatLayout(
     val scope = rememberCoroutineScope()
     Column(
         verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally
+        horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         LanguageDropdown(
             languages = supportedLanguages,
@@ -142,12 +128,51 @@ fun ModeratedChatLayout(
             },
             language = currentLanguage,
             onLanguageChange = {
+                // TODO: not sure how much of this is necessary, but the withContext def is
                 scope.launch {
                     withContext(Dispatchers.IO) {
+                        coroutineScope {
+                            launch {
+                                if (topicClient != null) {
+                                    // TODO: this doesn't kill the subscription!?!?
+                                    println("closing current topic client $topicClient")
+                                    topicClient!!.close()
+                                    topicClient = null
+                                }
+                                // TODO: don't do this every time
+                                getApiToken(userName, userId)
+                                val credentialProvider =
+                                    CredentialProvider.fromString(momentoApiToken)
+                                topicClient = TopicClient(
+                                    credentialProvider = credentialProvider,
+                                    configuration = TopicConfigurations.Laptop.latest
+                                )
+                                println("got new topic client $topicClient")
+                            }
+                        }
+                        if (currentLanguage == it) {
+                            println("ALREADY PROCESSING $currentLanguage")
+                            return@withContext
+                        }
                         currentLanguage = it
                         println("language changed to $currentLanguage")
                         currentMessages = getMessagesForLanguage(currentLanguage)
-                        print("messages changed to $currentMessages")
+                        println("messages refreshed")
+                        println("RESUBSCRIBING")
+                        coroutineScope {
+                            topicSubscribe(currentLanguage)
+                            {
+                                val jsonMessage = JSONObject(it)
+                                val parsedMessage = parseMessage(jsonMessage)
+                                if (parsedMessage.sourceLanguage == currentLanguage) {
+                                    currentMessages = currentMessages.plus(
+                                        "\n\n${parsedMessage.user.name}: ${parsedMessage.message}"
+                                    )
+                                    println("message added to current messages list")
+                                    return@topicSubscribe
+                                }
+                            }
+                        }
                     }
                 }
             },
@@ -158,10 +183,7 @@ fun ModeratedChatLayout(
             onValueChange = { chatMessage = it },
             label = { Text("Type your message . . .") },
             singleLine = true,
-            keyboardOptions = KeyboardOptions.Default.copy(
-                keyboardType = KeyboardType.Text,
-                imeAction = ImeAction.Done
-            ),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text),
             modifier = Modifier
                 .fillMaxWidth()
         )
@@ -199,11 +221,7 @@ fun MessageList(
     messages: String,
     modifier: Modifier = Modifier
 ) {
-    println("---> MessagesList with messages: $messages")
-    var charsToShow = 1000
-    if (messages.length < charsToShow) {
-        charsToShow = messages.length - 1
-    }
+    println("---> MessagesList")
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -227,7 +245,6 @@ fun LanguageDropdown(
     onLanguageChange: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    println("---> LanguageDropdown with langs = $languages")
     var menuExpanded by remember { mutableStateOf(false) }
     LaunchedEffect(languages) {
         withContext(Dispatchers.IO) {
@@ -241,8 +258,6 @@ fun LanguageDropdown(
             .wrapContentSize(Alignment.TopStart)
             .padding(8.dp)
     ) {
-        println("rendering ddl")
-        println("langs: $languages")
         Button(onClick = { menuExpanded = !menuExpanded }) {
             Text(text = languages[language] ?: "Loading...")
             Icon(Icons.Default.ArrowDropDown, contentDescription = null)
@@ -251,7 +266,6 @@ fun LanguageDropdown(
             expanded = menuExpanded,
             onDismissRequest = {
                 menuExpanded = false
-                println("menu rollup lang is $language")
             }
         ) {
             for (languageItem in languages.entries.iterator()) {
@@ -265,21 +279,33 @@ fun LanguageDropdown(
             }
         }
     }
-    println("---> Exiting LanguageDropdown")
 }
 
 
-suspend fun topicSubscribe(topicClient: TopicClient) {
-    // TODO: changing languages should resubscribe
-    when (val response = topicClient.subscribe("moderator", "chat-en")) {
+suspend fun topicSubscribe(
+    language: String,
+    onMessage: (String) -> Unit
+) {
+    if (topicClient == null) {
+        println("Topic Client is null-- bailing!!")
+        return
+    }
+    println("Subscribing to chat-$language")
+    when (val response = topicClient!!.subscribe("moderator", "chat-$language")) {
         is TopicSubscribeResponse.Subscription -> coroutineScope {
             launch {
                 // TODO: how do I do this without a timeout?
                 withTimeoutOrNull(5_000_000_000) {
                     response.collect { item ->
                         when (item) {
-                            is TopicMessage.Text -> println("Received text message: ${item.value}")
-                            is TopicMessage.Binary -> println("Received binary message: ${item.value}")
+                            is TopicMessage.Text -> {
+                                println("Received text message: ${item.value}")
+                                onMessage(item.value)
+                            }
+                            is TopicMessage.Binary -> {
+                                println("Received binary message: ${item.value}")
+                                onMessage("${item.value}")
+                            }
                             is TopicMessage.Error -> throw RuntimeException(
                                 "An error occurred reading messages from topic 'test-topic': ${item.errorCode}", item
                             )
@@ -317,7 +343,8 @@ private fun getApiToken(username: String, id: UUID) {
             }
             val jsonObject = JSONObject(response.toString())
             momentoApiToken = jsonObject.getString("token")
-            tokenExpiresAt = jsonObject.getInt("expiresAtEpoch")
+            tokenExpiresAt = jsonObject.getLong("expiresAtEpoch")
+            println("api token expires in ${tokenExpiresAt - (System.currentTimeMillis() / 1000)} secs")
         }
     }
 }
@@ -340,7 +367,6 @@ private fun getSupportedLanguages(): HashMap<String, String> {
 private fun getMessagesForLanguage(languageCode: String): String {
     println("Getting messages for $languageCode")
     val apiUrl = "$baseApiUrl/v1/translate/latestMessages/$languageCode"
-    println(apiUrl)
     val messages = URL(apiUrl).readText()
     val jsonObject = JSONObject(messages)
     val messagesFromJson = jsonObject.getJSONArray("messages")
@@ -351,12 +377,29 @@ private fun getMessagesForLanguage(languageCode: String): String {
         if (message.getString("messageType") != "text") {
             continue
         }
-        val messageText = message.getString("message")
-        val authorJson = message.getJSONObject("user")
-        val author = authorJson.getString("username")
-        messageList.add("$author: $messageText")
+        val parsedMessage = parseMessage(message = message)
+        messageList.add("${parsedMessage.user.name}: ${parsedMessage.message}")
     }
     return messageList.joinToString("\n\n")
+}
+
+private fun parseMessage(message: JSONObject): ChatMessage {
+    val messageType = message.getString("messageType")
+    val messageText = message.getString("message")
+    val timestamp = message.getLong("timestamp")
+    val sourceLanguage = message.getString("sourceLanguage")
+    val authorJson = message.getJSONObject("user")
+    val name = authorJson.getString("username")
+    val id = authorJson.getString("id")
+    return ChatMessage(
+        user = ChatUser(
+            name = name, id = id
+        ),
+        messageType = messageType,
+        message = messageText,
+        sourceLanguage = sourceLanguage,
+        timestamp = timestamp
+    )
 }
 
 private suspend fun publishMessage(
@@ -370,7 +413,7 @@ private suspend fun publishMessage(
     }
     println("chat message is $chatMessage")
     val gson = Gson()
-    val user = ChatUser(name = userName, id = userId)
+    val user = ChatUser(name = userName, id = userId.toString())
     val message = ChatMessage(
         timestamp = System.currentTimeMillis(),
         message = chatMessage,
