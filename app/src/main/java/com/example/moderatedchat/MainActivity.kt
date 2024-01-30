@@ -11,7 +11,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.wrapContentSize
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material3.Button
@@ -53,6 +55,7 @@ import java.io.InputStreamReader
 import java.io.OutputStreamWriter
 import java.net.URL
 import java.net.URLEncoder
+import java.util.ArrayList
 import java.util.UUID
 import javax.net.ssl.HttpsURLConnection
 import kotlin.collections.HashMap
@@ -103,6 +106,8 @@ fun ModeratedChatApp(name: String, modifier: Modifier = Modifier) {
                 credentialProvider = credentialProvider,
                 configuration = TopicConfigurations.Laptop.latest
             )
+            // TODO: need to move this to the layout so it can accept a callback
+            //  for modifying currentMessages there . . .
             coroutineScope {
                 launch { topicSubscribe(topicClient!!) }
             }
@@ -205,12 +210,10 @@ fun MessageList(
             .wrapContentSize(align = Alignment.Center)
             .background(color = Color.Green)
             .padding(4.dp)
+            .verticalScroll(rememberScrollState())
     ) {
         Text(
-            // TODO: this causes the app to crash 100% of the time
-//            text = messages
-            // TODO: however, this works 100% of the time
-            text = messages.substring(0 .. charsToShow)
+            text = messages
         )
     }
     println("---> Exiting MessagesList")
@@ -338,7 +341,22 @@ private fun getMessagesForLanguage(languageCode: String): String {
     println("Getting messages for $languageCode")
     val apiUrl = "$baseApiUrl/v1/translate/latestMessages/$languageCode"
     println(apiUrl)
-    return URL(apiUrl).readText()
+    val messages = URL(apiUrl).readText()
+    val jsonObject = JSONObject(messages)
+    val messagesFromJson = jsonObject.getJSONArray("messages")
+    val messageList = ArrayList<String>()
+    for (i in 0..<messagesFromJson.length()) {
+        val message =  messagesFromJson.getJSONObject(i)
+        // TODO: image support
+        if (message.getString("messageType") != "text") {
+            continue
+        }
+        val messageText = message.getString("message")
+        val authorJson = message.getJSONObject("user")
+        val author = authorJson.getString("username")
+        messageList.add("$author: $messageText")
+    }
+    return messageList.joinToString("\n\n")
 }
 
 private suspend fun publishMessage(
