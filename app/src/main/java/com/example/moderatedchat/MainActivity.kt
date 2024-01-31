@@ -129,26 +129,28 @@ fun ModeratedChatLayout(
             },
             language = currentLanguage,
             onLanguageChange = {
+                println("onLanguage change: $currentLanguage -> $it")
                 // TODO: not sure how much of this is necessary, but the withContext def is
                 scope.launch {
                     withContext(Dispatchers.IO) {
                         coroutineScope {
                             launch {
-                                if (topicClient != null) {
-                                    // TODO: this doesn't kill the subscription!?!?
-                                    println("closing current topic client $topicClient")
-                                    topicClient!!.close()
-                                    topicClient = null
+                                // TODO: Also reconstruct topic client when token is about
+                                //  to expire. Existing subscribeJob should keep running I
+                                //  think so no need to resubscribe?
+                                //
+                                //  TODO: Also, remember topicClient as nullable
+                                if (topicClient == null) {
+                                    // TODO: move api token to remember and pass in callback
+                                    getApiToken(userName, userId)
+                                    val credentialProvider =
+                                        CredentialProvider.fromString(momentoApiToken)
+                                    topicClient = TopicClient(
+                                        credentialProvider = credentialProvider,
+                                        configuration = TopicConfigurations.Laptop.latest
+                                    )
+                                    println("got new topic client $topicClient")
                                 }
-                                // TODO: don't do this every time
-                                getApiToken(userName, userId)
-                                val credentialProvider =
-                                    CredentialProvider.fromString(momentoApiToken)
-                                topicClient = TopicClient(
-                                    credentialProvider = credentialProvider,
-                                    configuration = TopicConfigurations.Laptop.latest
-                                )
-                                println("got new topic client $topicClient")
                             }
                         }
                         if (currentLanguage == it) {
@@ -173,11 +175,8 @@ fun ModeratedChatLayout(
                             {
                                 val jsonMessage = JSONObject(it)
                                 val parsedMessage = parseMessage(jsonMessage)
-                                if (parsedMessage.sourceLanguage == currentLanguage) {
-                                    currentMessages.add(parsedMessage)
-                                    println("message added to current messages list")
-                                    return@topicSubscribe
-                                }
+                                currentMessages.add(parsedMessage)
+                                println("message added to current messages list")
                             }
                         }
                     }
@@ -269,8 +268,8 @@ fun LanguageDropdown(
     var menuExpanded by remember { mutableStateOf(false) }
     LaunchedEffect(languages) {
         withContext(Dispatchers.IO) {
-            onLanguageChange("en")
             onLanguagesLoad(getSupportedLanguages())
+            onLanguageChange("en")
         }
     }
     Box(
@@ -315,23 +314,20 @@ suspend fun topicSubscribe(
     when (val response = topicClient!!.subscribe("moderator", "chat-$language")) {
         is TopicSubscribeResponse.Subscription -> coroutineScope {
             launch {
-                // TODO: how do I do this without a timeout?
-                withTimeoutOrNull(5_000_000_000) {
-                    response.collect { item ->
-                        yield()
-                        when (item) {
-                            is TopicMessage.Text -> {
-                                println("Received text message: ${item.value}")
-                                onMessage(item.value)
-                            }
-                            is TopicMessage.Binary -> {
-                                println("Received binary message: ${item.value}")
-                                onMessage("${item.value}")
-                            }
-                            is TopicMessage.Error -> throw RuntimeException(
-                                "An error occurred reading messages from topic 'test-topic': ${item.errorCode}", item
-                            )
+                response.collect { item ->
+                    yield()
+                    when (item) {
+                        is TopicMessage.Text -> {
+                            println("Received text message: ${item.value}")
+                            onMessage(item.value)
                         }
+                        is TopicMessage.Binary -> {
+                            println("Received binary message: ${item.value}")
+                            onMessage("${item.value}")
+                        }
+                        is TopicMessage.Error -> throw RuntimeException(
+                            "An error occurred reading messages from topic 'test-topic': ${item.errorCode}", item
+                        )
                     }
                 }
             }
