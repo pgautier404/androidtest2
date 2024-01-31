@@ -3,7 +3,6 @@ package com.example.moderatedchat
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -34,16 +33,18 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.example.moderatedchat.ui.theme.ModeratedChatTheme
 import com.google.gson.Gson
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.yield
 import org.json.JSONObject
 import software.momento.kotlin.sdk.TopicClient
 import software.momento.kotlin.sdk.auth.CredentialProvider
@@ -115,6 +116,7 @@ fun ModeratedChatLayout(
     var currentLanguage by remember { mutableStateOf("xx") }
     val currentMessages = remember { mutableStateListOf<ChatMessage>() }
     var chatMessage by remember{ mutableStateOf("") }
+    var subscribeJob by remember { mutableStateOf<Job?>(null) }
     val scope = rememberCoroutineScope()
     Column(
         verticalArrangement = Arrangement.Center,
@@ -156,15 +158,18 @@ fun ModeratedChatLayout(
                         currentLanguage = it
                         println("language changed to $currentLanguage")
                         currentMessages.clear()
-                        getMessagesForLanguage(languageCode = currentLanguage){
+                        getMessagesForLanguage(languageCode = currentLanguage) {
                             for (i in 0..<it.count()) {
                                 currentMessages.add(it[i])
                             }
                         }
                         println("messages refreshed")
-                        println("RESUBSCRIBING")
-                        coroutineScope {
-                            topicSubscribe(currentLanguage)
+                        if (subscribeJob != null) {
+                            println("cancelling existing subscribe job")
+                            subscribeJob!!.cancelAndJoin()
+                        }
+                        subscribeJob = launch {
+                            topicSubscribe(language = currentLanguage)
                             {
                                 val jsonMessage = JSONObject(it)
                                 val parsedMessage = parseMessage(jsonMessage)
@@ -238,7 +243,9 @@ fun ChatEntry(message: ChatMessage, modifier: Modifier = Modifier) {
         color = MaterialTheme.colorScheme.primary,
         modifier = modifier.padding(vertical = 4.dp, horizontal = 8.dp)
     ) {
-        Column(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+        Column(modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp)) {
             Text(
                 text = message.user.name,
                 modifier = modifier
@@ -311,6 +318,7 @@ suspend fun topicSubscribe(
                 // TODO: how do I do this without a timeout?
                 withTimeoutOrNull(5_000_000_000) {
                     response.collect { item ->
+                        yield()
                         when (item) {
                             is TopicMessage.Text -> {
                                 println("Received text message: ${item.value}")
@@ -385,6 +393,7 @@ private fun getMessagesForLanguage(
     println("Getting messages for $languageCode")
     val apiUrl = "$baseApiUrl/v1/translate/latestMessages/$languageCode"
     val messages = URL(apiUrl).readText()
+    println("received ${messages.length} bytes")
     val jsonObject = JSONObject(messages)
     val messagesFromJson = jsonObject.getJSONArray("messages")
     val messageList = mutableListOf<ChatMessage>()
@@ -428,7 +437,6 @@ private suspend fun publishMessage(
     if (topicClient === null) {
         println("Skipping publish because topic client is null")
     }
-    println("chat message is $chatMessage")
     val gson = Gson()
     val user = ChatUser(name = userName, id = userId.toString())
     val message = ChatMessage(
