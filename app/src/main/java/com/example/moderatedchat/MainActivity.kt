@@ -27,6 +27,7 @@ import androidx.compose.material3.TextField
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -34,7 +35,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.example.moderatedchat.ui.theme.ModeratedChatTheme
@@ -55,7 +55,6 @@ import java.io.InputStreamReader
 import java.io.OutputStreamWriter
 import java.net.URL
 import java.net.URLEncoder
-import java.util.ArrayList
 import java.util.UUID
 import javax.net.ssl.HttpsURLConnection
 import kotlin.collections.HashMap
@@ -114,7 +113,7 @@ fun ModeratedChatLayout(
 ) {
     var supportedLanguages by remember { mutableStateOf(mapOf("xx" to "Loading...")) }
     var currentLanguage by remember { mutableStateOf("xx") }
-    var currentMessages by remember { mutableStateOf("Waiting for messages...")}
+    val currentMessages = remember { mutableStateListOf<ChatMessage>() }
     var chatMessage by remember{ mutableStateOf("") }
     val scope = rememberCoroutineScope()
     Column(
@@ -156,7 +155,12 @@ fun ModeratedChatLayout(
                         }
                         currentLanguage = it
                         println("language changed to $currentLanguage")
-                        currentMessages = getMessagesForLanguage(currentLanguage)
+                        currentMessages.clear()
+                        getMessagesForLanguage(languageCode = currentLanguage){
+                            for (i in 0..<it.count()) {
+                                currentMessages.add(it[i])
+                            }
+                        }
                         println("messages refreshed")
                         println("RESUBSCRIBING")
                         coroutineScope {
@@ -165,9 +169,7 @@ fun ModeratedChatLayout(
                                 val jsonMessage = JSONObject(it)
                                 val parsedMessage = parseMessage(jsonMessage)
                                 if (parsedMessage.sourceLanguage == currentLanguage) {
-                                    currentMessages = currentMessages.plus(
-                                        "\n\n${parsedMessage.user.name}: ${parsedMessage.message}"
-                                    )
+                                    currentMessages.add(parsedMessage)
                                     println("message added to current messages list")
                                     return@topicSubscribe
                                 }
@@ -218,7 +220,7 @@ fun ModeratedChatLayout(
 
 @Composable
 fun MessageList(
-    messages: String,
+    messages: List<ChatMessage>,
     modifier: Modifier = Modifier
 ) {
     println("---> MessagesList")
@@ -230,9 +232,11 @@ fun MessageList(
             .padding(4.dp)
             .verticalScroll(rememberScrollState())
     ) {
-        Text(
-            text = messages
-        )
+        for (i in 0..<messages.count()) {
+            Text(
+                text = messages[i].message
+            )
+        }
     }
     println("---> Exiting MessagesList")
 }
@@ -364,13 +368,16 @@ private fun getSupportedLanguages(): HashMap<String, String> {
     return supportedLanguages
 }
 
-private fun getMessagesForLanguage(languageCode: String): String {
+private fun getMessagesForLanguage(
+    languageCode: String,
+    onMessages: (List<ChatMessage>) -> Unit
+) {
     println("Getting messages for $languageCode")
     val apiUrl = "$baseApiUrl/v1/translate/latestMessages/$languageCode"
     val messages = URL(apiUrl).readText()
     val jsonObject = JSONObject(messages)
     val messagesFromJson = jsonObject.getJSONArray("messages")
-    val messageList = ArrayList<String>()
+    val messageList = mutableListOf<ChatMessage>()
     for (i in 0..<messagesFromJson.length()) {
         val message =  messagesFromJson.getJSONObject(i)
         // TODO: image support
@@ -378,9 +385,9 @@ private fun getMessagesForLanguage(languageCode: String): String {
             continue
         }
         val parsedMessage = parseMessage(message = message)
-        messageList.add("${parsedMessage.user.name}: ${parsedMessage.message}")
+        messageList.add(parsedMessage)
     }
-    return messageList.joinToString("\n\n")
+    onMessages(messageList.toList())
 }
 
 private fun parseMessage(message: JSONObject): ChatMessage {
