@@ -11,9 +11,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.wrapContentSize
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material3.Button
@@ -223,22 +223,32 @@ fun MessageList(
     messages: List<ChatMessage>,
     modifier: Modifier = Modifier
 ) {
-    println("---> MessagesList")
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .wrapContentSize(align = Alignment.Center)
-            .background(color = Color.Green)
-            .padding(4.dp)
-            .verticalScroll(rememberScrollState())
-    ) {
-        for (i in 0..<messages.count()) {
-            Text(
-                text = messages[i].message
+    LazyColumn(modifier = modifier.padding(4.dp)) {
+        items(items = messages) { item ->
+            ChatEntry(
+                message = item
             )
         }
     }
-    println("---> Exiting MessagesList")
+}
+
+@Composable
+fun ChatEntry(message: ChatMessage, modifier: Modifier = Modifier) {
+    Surface(
+        color = MaterialTheme.colorScheme.primary,
+        modifier = modifier.padding(vertical = 4.dp, horizontal = 8.dp)
+    ) {
+        Column(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+            Text(
+                text = message.user.name,
+                modifier = modifier
+            )
+            Text(
+                text = message.message,
+                modifier = modifier
+            )
+        }
+    }
 }
 
 @Composable
