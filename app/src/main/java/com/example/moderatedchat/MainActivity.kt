@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
@@ -255,7 +256,17 @@ fun MessageList(
     messages: List<ChatMessage>,
     modifier: Modifier = Modifier
 ) {
-    LazyColumn(modifier = modifier.padding(4.dp)) {
+    val lazyColumnListState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
+
+    LazyColumn(
+        state = lazyColumnListState,
+        modifier = modifier.padding(4.dp)
+    ) {
+        scope.launch {
+            println("scrolling...")
+            lazyColumnListState.scrollToItem(messages.count())
+        }
         items(items = messages) { item ->
             ChatEntry(
                 message = item
