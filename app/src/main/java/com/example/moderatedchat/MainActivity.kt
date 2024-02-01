@@ -6,6 +6,7 @@ import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -34,6 +35,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.example.moderatedchat.ui.theme.ModeratedChatTheme
@@ -57,6 +59,7 @@ import java.io.InputStreamReader
 import java.io.OutputStreamWriter
 import java.net.URL
 import java.net.URLEncoder
+import java.util.Locale
 import java.util.UUID
 import javax.net.ssl.HttpsURLConnection
 import kotlin.collections.HashMap
@@ -156,11 +159,13 @@ fun ModeratedChatLayout(
     val currentMessages = remember { mutableStateListOf<ChatMessage>() }
     var chatMessage by remember{ mutableStateOf("") }
     var subscribeJob by remember { mutableStateOf<Job?>(null) }
-    val scope = rememberCoroutineScope()
+    val focusManager = LocalFocusManager.current
+
     Column(
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
+        val scope = rememberCoroutineScope()
         LanguageDropdown(
             languages = supportedLanguages,
             onLanguagesLoad = {
@@ -221,46 +226,51 @@ fun ModeratedChatLayout(
             },
             modifier = modifier.fillMaxWidth()
         )
-        TextField(
-            value = chatMessage,
-            onValueChange = { chatMessage = it },
-            label = { Text("Type your message . . .") },
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text),
-            modifier = Modifier
-                .fillMaxWidth()
-        )
-        Button(
-            onClick = {
-                if (chatMessage.isEmpty()) {
-                    return@Button
-                }
-                println("sending message $chatMessage")
-                // copy message and language values to send to publish
-                val publishMessage = chatMessage
-                val publishLanguage = currentLanguage
-                scope.launch {
-                    publishMessage(
-                        userName = userName,
-                        userId = userId,
-                        currentLanguage = publishLanguage,
-                        chatMessage = publishMessage
-                    )
-                }
-                chatMessage = ""
-            }
-        ) {
-            Text(text = "Send")
-        }
         MessageList(
+            currentUserId = userId,
             messages = currentMessages,
-            modifier = Modifier.fillMaxSize()
+            modifier = Modifier.weight(1f).padding(4.dp)
         )
+        Row {
+            TextField(
+                value = chatMessage,
+                onValueChange = { chatMessage = it },
+                label = { Text("Type your message . . .") },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text),
+                modifier = Modifier
+                    .weight(1f)
+            )
+            Button(
+                onClick = {
+                    if (chatMessage.isEmpty()) {
+                        return@Button
+                    }
+                    focusManager.clearFocus()
+                    println("sending message $chatMessage")
+                    // copy message and language values to send to publish
+                    val publishMessage = chatMessage
+                    val publishLanguage = currentLanguage
+                    scope.launch {
+                        publishMessage(
+                            userName = userName,
+                            userId = userId,
+                            currentLanguage = publishLanguage,
+                            chatMessage = publishMessage
+                        )
+                    }
+                    chatMessage = ""
+                }
+            ) {
+                Text(text = "Send")
+            }
+        }
     }
 }
 
 @Composable
 fun MessageList(
+    currentUserId: UUID,
     messages: List<ChatMessage>,
     modifier: Modifier = Modifier
 ) {
@@ -269,7 +279,7 @@ fun MessageList(
 
     LazyColumn(
         state = lazyColumnListState,
-        modifier = modifier.padding(4.dp)
+        modifier = modifier
     ) {
         scope.launch {
             println("scrolling...")
@@ -277,6 +287,7 @@ fun MessageList(
         }
         items(items = messages) { item ->
             ChatEntry(
+                currentUserId = currentUserId,
                 message = item
             )
         }
@@ -284,16 +295,27 @@ fun MessageList(
 }
 
 @Composable
-fun ChatEntry(message: ChatMessage, modifier: Modifier = Modifier) {
+fun ChatEntry(
+    currentUserId: UUID,
+    message: ChatMessage,
+    modifier: Modifier = Modifier
+) {
+    val color = if (currentUserId.toString() == message.user.id) {
+        MaterialTheme.colorScheme.primary
+    } else {
+        MaterialTheme.colorScheme.secondary
+    }
+    val sdf = java.text.SimpleDateFormat("HH:mm a", Locale.US)
+    val parsedDate = sdf.format(java.util.Date(message.timestamp))
     Surface(
-        color = MaterialTheme.colorScheme.primary,
+        color = color,
         modifier = modifier.padding(vertical = 4.dp, horizontal = 8.dp)
     ) {
         Column(modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = 4.dp)) {
             Text(
-                text = message.user.name,
+                text = "${message.user.name} - $parsedDate",
                 modifier = modifier
             )
             Text(
