@@ -43,7 +43,6 @@ import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.yield
 import org.json.JSONObject
 import software.momento.kotlin.sdk.TopicClient
@@ -135,26 +134,17 @@ fun ModeratedChatLayout(
                     withContext(Dispatchers.IO) {
                         coroutineScope {
                             launch {
-                                // TODO: Also reconstruct topic client when token is about
-                                //  to expire. Existing subscribeJob should keep running I
-                                //  think so no need to resubscribe?
-                                //
-                                //  TODO: Also, remember topicClient as nullable
-                                if (topicClient == null) {
-                                    // TODO: move api token to remember and pass in callback
-                                    getApiToken(userName, userId)
-                                    val credentialProvider =
-                                        CredentialProvider.fromString(momentoApiToken)
-                                    topicClient = TopicClient(
-                                        credentialProvider = credentialProvider,
-                                        configuration = TopicConfigurations.Laptop.latest
-                                    )
-                                    println("got new topic client $topicClient")
+                                // TODO: Ok, so how do I reliably resubscribe after my token expires?
+                                val tokenExpiresInSecs = tokenExpiresAt - (System.currentTimeMillis() / 1000)
+                                println("token expires in $tokenExpiresInSecs")
+                                if (topicClient == null || tokenExpiresInSecs < 10) {
+                                    topicClient?.close()
+                                    getTopicClient(userName, userId)
                                 }
                             }
                         }
                         if (currentLanguage == it) {
-                            println("ALREADY PROCESSING $currentLanguage")
+                            println("language $currentLanguage not changed. skipping.")
                             return@withContext
                         }
                         currentLanguage = it
@@ -306,16 +296,14 @@ suspend fun topicSubscribe(
     language: String,
     onMessage: (String) -> Unit
 ) {
-    if (topicClient == null) {
-        println("Topic Client is null-- bailing!!")
-        return
-    }
     println("Subscribing to chat-$language")
     when (val response = topicClient!!.subscribe("moderator", "chat-$language")) {
         is TopicSubscribeResponse.Subscription -> coroutineScope {
+            val subscribeBeginSecs = System.currentTimeMillis() / 1000
             launch {
                 response.collect { item ->
                     yield()
+                    println("subscribed for ${(System.currentTimeMillis() / 1000) - subscribeBeginSecs} seconds")
                     when (item) {
                         is TopicMessage.Text -> {
                             println("Received text message: ${item.value}")
@@ -365,6 +353,21 @@ private fun getApiToken(username: String, id: UUID) {
             println("api token expires in ${tokenExpiresAt - (System.currentTimeMillis() / 1000)} secs")
         }
     }
+}
+
+private fun getTopicClient(
+    userName: String,
+    userId: UUID
+) {
+    // TODO: move api token to remember and pass in callback
+    getApiToken(userName, userId)
+    val credentialProvider =
+        CredentialProvider.fromString(momentoApiToken)
+    topicClient = TopicClient(
+        credentialProvider = credentialProvider,
+        configuration = TopicConfigurations.Laptop.latest
+    )
+    println("got new topic client $topicClient")
 }
 
 private fun getSupportedLanguages(): HashMap<String, String> {
@@ -430,8 +433,12 @@ private suspend fun publishMessage(
     currentLanguage: String,
     chatMessage: String,
 ) {
-    if (topicClient === null) {
-        println("Skipping publish because topic client is null")
+    val tokenExpiresInSecs = tokenExpiresAt - (System.currentTimeMillis() / 1000)
+    if (tokenExpiresInSecs < 10) {
+        withContext(Dispatchers.IO) {
+            topicClient?.close()
+            getTopicClient(userName, userId)
+        }
     }
     val gson = Gson()
     val user = ChatUser(name = userName, id = userId.toString())
