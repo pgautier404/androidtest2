@@ -1,8 +1,11 @@
 package com.example.moderatedchat
 
+import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -38,6 +41,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import coil.compose.AsyncImage
 import com.example.moderatedchat.ui.theme.ModeratedChatTheme
 import com.google.gson.Gson
 import kotlinx.coroutines.Dispatchers
@@ -161,6 +165,14 @@ fun ModeratedChatLayout(
     var subscribeJob by remember { mutableStateOf<Job?>(null) }
     val focusManager = LocalFocusManager.current
 
+    var imageUri by remember { mutableStateOf<Uri?>(null) }
+    val launcher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        imageUri = uri
+        println("====> Got image: $imageUri")
+    }
+
     Column(
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -229,7 +241,9 @@ fun ModeratedChatLayout(
         MessageList(
             currentUserId = userId,
             messages = currentMessages,
-            modifier = Modifier.weight(1f).padding(4.dp)
+            modifier = Modifier
+                .weight(1f)
+                .padding(4.dp)
         )
         Row {
             TextField(
@@ -263,6 +277,14 @@ fun ModeratedChatLayout(
                 }
             ) {
                 Text(text = "Send")
+            }
+            Button(
+                onClick = {
+                    launcher.launch("image/*")
+                    println("image chosen: $imageUri")
+                }
+            ) {
+                Text(text = "IMG")
             }
         }
     }
