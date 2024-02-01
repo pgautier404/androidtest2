@@ -75,7 +75,7 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    ModeratedChatApp("pete")
+                    ModeratedChatApp()
                 }
             }
         }
@@ -96,13 +96,51 @@ data class ChatMessage(
 )
 
 @Composable
-fun ModeratedChatApp(name: String, modifier: Modifier = Modifier) {
+fun ModeratedChatApp(modifier: Modifier = Modifier) {
+    var userName by remember { mutableStateOf("") }
     val userId = UUID.randomUUID()
-    ModeratedChatLayout(
-        userName = name,
-        userId = userId,
-        modifier = modifier
-    )
+    if (userName.isBlank()) {
+        ModeratedChatLogin(
+            {
+                userName = it
+            }
+        )
+    } else {
+        ModeratedChatLayout(
+            userName = userName,
+            userId = userId,
+            modifier = modifier
+        )
+    }
+}
+
+@Composable
+fun ModeratedChatLogin(
+    onLogin: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Column(
+        modifier = modifier.fillMaxSize(),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        var userNameField by remember { mutableStateOf("") }
+        Text("Welcome to the Momento Moderated Chat!")
+        TextField(
+            value = userNameField,
+            label = { Text("Choose your username...") },
+            singleLine = true,
+            onValueChange = {
+                userNameField = it
+            }
+        )
+        Button(
+            modifier = Modifier.padding(vertical = 24.dp),
+            onClick = { onLogin(userNameField) }
+        ) {
+            Text("Continue")
+        }
+    }
 }
 
 @Composable
