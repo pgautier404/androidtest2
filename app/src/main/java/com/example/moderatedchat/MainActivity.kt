@@ -42,6 +42,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.yield
@@ -173,7 +174,6 @@ fun ModeratedChatLayout(
                     withContext(Dispatchers.IO) {
                         coroutineScope {
                             launch {
-                                // TODO: Ok, so how do I reliably resubscribe after my token expires?
                                 val tokenExpiresInSecs = tokenExpiresAt - (System.currentTimeMillis() / 1000)
                                 println("token expires in $tokenExpiresInSecs")
                                 if (topicClient == null || tokenExpiresInSecs < 10) {
@@ -199,14 +199,22 @@ fun ModeratedChatLayout(
                             println("cancelling existing subscribe job")
                             subscribeJob!!.cancelAndJoin()
                         }
-                        subscribeJob = launch {
-                            topicSubscribe(language = currentLanguage)
-                            {
-                                val jsonMessage = JSONObject(it)
-                                val parsedMessage = parseMessage(jsonMessage)
-                                currentMessages.add(parsedMessage)
-                                println("message added to current messages list")
+                        while (true) {
+                            subscribeJob = launch {
+                                topicSubscribe(language = currentLanguage)
+                                {
+                                    val jsonMessage = JSONObject(it)
+                                    val parsedMessage = parseMessage(jsonMessage)
+                                    currentMessages.add(parsedMessage)
+                                    println("message added to current messages list")
+                                }
                             }
+                            val resubscribeAfterSecs = 180L
+                            delay(resubscribeAfterSecs * 1000)
+                            subscribeJob?.cancelAndJoin()
+                            topicClient?.close()
+                            getTopicClient(userName, userId)
+                            print("resubscribing")
                         }
                     }
                 }
@@ -340,12 +348,11 @@ fun LanguageDropdown(
     }
 }
 
-
 suspend fun topicSubscribe(
     language: String,
     onMessage: (String) -> Unit
 ) {
-    println("Subscribing to chat-$language")
+    println("Subscribing to chat-$language with $topicClient")
     when (val response = topicClient!!.subscribe("moderator", "chat-$language")) {
         is TopicSubscribeResponse.Subscription -> coroutineScope {
             val subscribeBeginSecs = System.currentTimeMillis() / 1000
