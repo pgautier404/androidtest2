@@ -31,6 +31,7 @@ import androidx.compose.material3.TextField
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -171,48 +172,7 @@ fun ModeratedChatLayout(
     var supportedLanguages by remember { mutableStateOf(mapOf("xx" to "Loading...")) }
     var currentLanguage by remember { mutableStateOf("xx") }
     val currentMessages = remember { mutableStateListOf<ChatMessage>() }
-    var chatMessage by remember{ mutableStateOf("") }
     var subscribeJob by remember { mutableStateOf<Job?>(null) }
-    val focusManager = LocalFocusManager.current
-
-    val context = LocalContext.current
-    var imageUri by remember { mutableStateOf<Uri?>(null) }
-    var imageBytes by remember { mutableStateOf<ByteArray?>(null) }
-    val imageScope = rememberCoroutineScope()
-    val launcher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent()
-    ) { uri: Uri? ->
-        imageUri = uri
-        println("====> Got image: $imageUri")
-        if (imageUri != null) {
-            val item = context.contentResolver.openInputStream(imageUri!!)
-            imageBytes = item?.readBytes()
-            println("Got ${imageBytes?.size} bytes")
-            println(Base64.getEncoder().encodeToString(imageBytes))
-            item?.close()
-            imageScope.launch {
-                withContext(Dispatchers.IO) {
-                    val imageId = "image-${UUID.randomUUID().toString()}"
-                    val imageData = Base64.getEncoder().encodeToString(imageBytes)
-                    val imageSetResponse = cacheClient?.set(
-                        "moderator", imageId, imageData
-                    )
-                    when (imageSetResponse) {
-                        is SetResponse.Error -> println("ERROR: ${imageSetResponse.message}")
-                        is SetResponse.Success -> println("Successfully set image in cache")
-                        else -> println("Unknown error: $imageSetResponse")
-                    }
-                    publishMessage(
-                        userName = userName,
-                        userId = userId,
-                        messageType = "image",
-                        chatMessage = imageId,
-                        currentLanguage = currentLanguage
-                    )
-                }
-            }
-        }
-    }
 
     Column(
         verticalArrangement = Arrangement.Center,
@@ -225,8 +185,8 @@ fun ModeratedChatLayout(
                 supportedLanguages = it
             },
             language = currentLanguage,
-            onLanguageChange = {
-                println("onLanguage change: $currentLanguage -> $it")
+            onLanguageChange = { newLanguage ->
+                println("onLanguage change: $currentLanguage -> $newLanguage")
                 // TODO: not sure how much of this is necessary, but the withContext def is
                 scope.launch {
                     withContext(Dispatchers.IO) {
@@ -239,11 +199,11 @@ fun ModeratedChatLayout(
                                 }
                             }
                         }
-                        if (currentLanguage == it) {
+                        if (currentLanguage == newLanguage) {
                             println("language $currentLanguage not changed. skipping.")
                             return@withContext
                         }
-                        currentLanguage = it
+                        currentLanguage = newLanguage
                         println("language changed to $currentLanguage")
                         currentMessages.clear()
                         getMessagesForLanguage(languageCode = currentLanguage) {
@@ -284,46 +244,102 @@ fun ModeratedChatLayout(
                 .weight(1f)
                 .padding(4.dp)
         )
-        Row {
-            TextField(
-                value = chatMessage,
-                onValueChange = { chatMessage = it },
-                label = { Text("Type your message . . .") },
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text),
-                modifier = Modifier
-                    .weight(1f)
-            )
-            Button(
-                onClick = {
-                    if (chatMessage.isEmpty()) {
-                        return@Button
+        MessageBar(
+            userName = userName,
+            userId = userId,
+            currentLanguage = currentLanguage
+        )
+
+    }
+}
+
+@Composable
+fun MessageBar(
+    userName: String,
+    userId: UUID,
+    currentLanguage: String,
+    modifier: Modifier = Modifier
+) {
+    var message by remember { mutableStateOf("") }
+    var imageUri by remember { mutableStateOf<Uri?>(null) }
+    var imageBytes by remember { mutableStateOf<ByteArray?>(null) }
+    val imageScope = rememberCoroutineScope()
+    val context = LocalContext.current
+
+    val focusManager = LocalFocusManager.current
+    val launcher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        imageUri = uri
+        println("====> Got image: $imageUri")
+        if (imageUri != null) {
+            val item = context.contentResolver.openInputStream(imageUri!!)
+            imageBytes = item?.readBytes()
+            println("Got ${imageBytes?.size} bytes")
+            println(Base64.getEncoder().encodeToString(imageBytes))
+            item?.close()
+            imageScope.launch {
+                withContext(Dispatchers.IO) {
+                    val imageId = "image-${UUID.randomUUID().toString()}"
+                    val imageData = Base64.getEncoder().encodeToString(imageBytes)
+                    val imageSetResponse = cacheClient?.set(
+                        "moderator", imageId, imageData
+                    )
+                    when (imageSetResponse) {
+                        is SetResponse.Error -> println("ERROR: ${imageSetResponse.message}")
+                        is SetResponse.Success -> println("Successfully set image in cache")
+                        else -> println("Unknown error: $imageSetResponse")
                     }
-                    focusManager.clearFocus()
-                    println("sending message $chatMessage")
-                    // copy message and language values to send to publish
-                    val publishMessage = chatMessage
-                    val publishLanguage = currentLanguage
-                    scope.launch {
-                        publishMessage(
-                            userName = userName,
-                            userId = userId,
-                            currentLanguage = publishLanguage,
-                            chatMessage = publishMessage
-                        )
-                    }
-                    chatMessage = ""
+                    publishMessage(
+                        userName = userName,
+                        userId = userId,
+                        messageType = "image",
+                        chatMessage = imageId,
+                        currentLanguage = currentLanguage
+                    )
                 }
-            ) {
-                Text(text = "Send")
             }
-            Button(
-                onClick = {
-                    launcher.launch("image/*")
+        }
+    }
+
+    Row {
+        TextField(
+            value = message,
+            onValueChange = { message = it },
+            label = { Text(text = "Type your message...") },
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text),
+            modifier = Modifier
+                .weight(1f)
+        )
+        Button(
+            onClick = {
+                if (message.isEmpty()) {
+                    return@Button
                 }
-            ) {
-                Text(text = "IMG")
+                focusManager.clearFocus()
+                println("sending message $message")
+                // copy message value to send to publish
+                val publishMessage = message
+                imageScope.launch {
+                    publishMessage(
+                        userName = userName,
+                        userId = userId,
+                        currentLanguage = currentLanguage,
+                        chatMessage = publishMessage
+                    )
+                }
+                message = ""
             }
+        ) {
+            Text(text = "Send")
+        }
+        Button(
+            onClick = {
+                launcher.launch("image/*")
+            }
+        ) {
+            Text(text = "IMG")
         }
     }
 }
@@ -346,19 +362,12 @@ fun MessageList(
             lazyColumnListState.scrollToItem(messages.count())
         }
         items(items = messages) { item ->
-            ChatEntry(
-                currentUserId = currentUserId,
-                message = item,
-//                onLoadMessage = {
-//                    println("onLoadMessage callback firing")
-//                    scope.launch {
-//                        println("onLoadMessage is scrolling")
-//                        if (!lazyColumnListState.isScrollInProgress) {
-//                            lazyColumnListState.scrollToItem(messages.count())
-//                        }
-//                    }
-//                }
-            )
+            key(item.message) {
+                ChatEntry(
+                    currentUserId = currentUserId,
+                    message = item
+                )
+            }
         }
     }
 }
@@ -377,7 +386,7 @@ fun ChatEntry(
     val sdf = java.text.SimpleDateFormat("HH:mm a", Locale.US)
     val parsedDate = sdf.format(java.util.Date(message.timestamp))
     var imageBytes by remember { mutableStateOf<ByteArray?>(null) }
-    LaunchedEffect(message) {
+    LaunchedEffect(message.message) {
         if (message.message.startsWith("image-")) {
             when (val getResponse = cacheClient?.get("moderator", message.message)) {
                 is GetResponse.Error -> println("Error getting image: $getResponse")
@@ -391,9 +400,11 @@ fun ChatEntry(
         color = color,
         modifier = modifier.padding(vertical = 4.dp, horizontal = 8.dp)
     ) {
-        Column(modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 4.dp)) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 4.dp)
+        ) {
             Text(
                 text = "${message.user.name} - $parsedDate",
                 modifier = modifier
