@@ -247,7 +247,8 @@ fun ModeratedChatLayout(
         MessageBar(
             userName = userName,
             userId = userId,
-            currentLanguage = currentLanguage
+            currentLanguage = currentLanguage,
+            modifier = modifier
         )
 
     }
@@ -309,7 +310,7 @@ fun MessageBar(
             label = { Text(text = "Type your message...") },
             singleLine = true,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text),
-            modifier = Modifier
+            modifier = modifier
                 .weight(1f)
         )
         Button(
@@ -387,12 +388,20 @@ fun ChatEntry(
     val parsedDate = sdf.format(java.util.Date(message.timestamp))
     var imageBytes by remember { mutableStateOf<ByteArray?>(null) }
     LaunchedEffect(message.message) {
-        if (message.message.startsWith("image-")) {
-            when (val getResponse = cacheClient?.get("moderator", message.message)) {
-                is GetResponse.Error -> println("Error getting image: $getResponse")
-                is GetResponse.Miss -> println("Cache miss g=fetching key ${message.message}")
-                is GetResponse.Hit -> imageBytes = Base64.getDecoder().decode(getResponse.value)
-                null -> println("get null response for image")
+        if (message.messageType == "image") {
+            if (message.message.startsWith("image-")) {
+                println("fetching image from cache by id")
+                val getResponse = cacheClient?.get("moderator", message.message)
+                println("get response: $getResponse")
+                when (getResponse) {
+                    is GetResponse.Error -> println("Error getting image: $getResponse")
+                    is GetResponse.Miss -> println("Cache miss g=fetching key ${message.message}")
+                    is GetResponse.Hit -> imageBytes = Base64.getDecoder().decode(getResponse.value)
+                    null -> println("get null response for image")
+                }
+                println()
+            } else {
+                imageBytes = Base64.getDecoder().decode(message.message)
             }
         }
     }
@@ -416,11 +425,9 @@ fun ChatEntry(
                 )
             } else {
                 println("rendering image...")
-                if (!message.message.startsWith("image-")) {
-                    imageBytes = Base64.getDecoder().decode(message.message)
-                }
+                val bytes = imageBytes
                 val request = ImageRequest.Builder(context = LocalContext.current)
-                    .data(imageBytes)
+                    .data(bytes)
                     .build()
                 AsyncImage(
                     model = request,
