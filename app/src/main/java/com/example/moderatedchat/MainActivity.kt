@@ -38,10 +38,10 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
-import coil.compose.AsyncImage
 import com.example.moderatedchat.ui.theme.ModeratedChatTheme
 import com.google.gson.Gson
 import kotlinx.coroutines.Dispatchers
@@ -53,9 +53,12 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.yield
 import org.json.JSONObject
+import software.momento.kotlin.sdk.CacheClient
 import software.momento.kotlin.sdk.TopicClient
 import software.momento.kotlin.sdk.auth.CredentialProvider
+import software.momento.kotlin.sdk.config.Configurations
 import software.momento.kotlin.sdk.config.TopicConfigurations
+import software.momento.kotlin.sdk.responses.cache.SetResponse
 import software.momento.kotlin.sdk.responses.topic.TopicMessage
 import software.momento.kotlin.sdk.responses.topic.TopicSubscribeResponse
 import java.io.BufferedReader
@@ -63,16 +66,19 @@ import java.io.InputStreamReader
 import java.io.OutputStreamWriter
 import java.net.URL
 import java.net.URLEncoder
+import java.util.Base64
 import java.util.Locale
 import java.util.UUID
 import javax.net.ssl.HttpsURLConnection
 import kotlin.collections.HashMap
+import kotlin.time.Duration.Companion.seconds
 
 const val baseApiUrl = "https://57zovcekn0.execute-api.us-west-2.amazonaws.com/prod"
 var momentoApiToken: String = ""
 var tokenExpiresAt: Long = 0
 // TODO: I really doubt this is right
 var topicClient: TopicClient? = null
+var cacheClient: CacheClient? = null
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -166,11 +172,42 @@ fun ModeratedChatLayout(
     val focusManager = LocalFocusManager.current
 
     var imageUri by remember { mutableStateOf<Uri?>(null) }
+    var imageBytes by remember { mutableStateOf<ByteArray?>(null) }
+    val context = LocalContext.current
+    val imageScope = rememberCoroutineScope()
     val launcher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
         imageUri = uri
         println("====> Got image: $imageUri")
+        if (imageUri != null) {
+            val item = context.contentResolver.openInputStream(imageUri!!)
+            imageBytes = item?.readBytes()
+            println("Got ${imageBytes?.size} bytes")
+            println(Base64.getEncoder().encodeToString(imageBytes))
+            item?.close()
+            imageScope.launch {
+                withContext(Dispatchers.IO) {
+                    val imageId = "image-${UUID.randomUUID().toString()}"
+                    val imageData = Base64.getEncoder().encodeToString(imageBytes)
+                    val imageSetResponse = cacheClient?.set(
+                        "moderator", imageId, imageData
+                    )
+                    when (imageSetResponse) {
+                        is SetResponse.Error -> println("ERROR: ${imageSetResponse.message}")
+                        is SetResponse.Success -> println("Successfully set image in cache")
+                        else -> println("Unknown error: $imageSetResponse")
+                    }
+                    publishMessage(
+                        userName = userName,
+                        userId = userId,
+                        messageType = "image",
+                        chatMessage = imageId,
+                        currentLanguage = currentLanguage
+                    )
+                }
+            }
+        }
     }
 
     Column(
@@ -195,7 +232,8 @@ fun ModeratedChatLayout(
                                 println("token expires in $tokenExpiresInSecs")
                                 if (topicClient == null || tokenExpiresInSecs < 10) {
                                     topicClient?.close()
-                                    getTopicClient(userName, userId)
+                                    cacheClient?.close()
+                                    getClients(userName, userId)
                                 }
                             }
                         }
@@ -230,7 +268,8 @@ fun ModeratedChatLayout(
                             delay(resubscribeAfterSecs * 1000)
                             subscribeJob?.cancelAndJoin()
                             topicClient?.close()
-                            getTopicClient(userName, userId)
+                            cacheClient?.close()
+                            getClients(userName, userId)
                             print("resubscribing")
                         }
                     }
@@ -281,7 +320,6 @@ fun ModeratedChatLayout(
             Button(
                 onClick = {
                     launcher.launch("image/*")
-                    println("image chosen: $imageUri")
                 }
             ) {
                 Text(text = "IMG")
@@ -455,7 +493,7 @@ private fun getApiToken(username: String, id: UUID) {
     }
 }
 
-private fun getTopicClient(
+private fun getClients(
     userName: String,
     userId: UUID
 ) {
@@ -467,7 +505,12 @@ private fun getTopicClient(
         credentialProvider = credentialProvider,
         configuration = TopicConfigurations.Laptop.latest
     )
-    println("got new topic client $topicClient")
+    cacheClient = CacheClient(
+        credentialProvider = credentialProvider,
+        configuration = Configurations.Laptop.latest,
+        itemDefaultTtl = 30.seconds
+    )
+    println("got new topic client $topicClient and cache client $cacheClient")
 }
 
 private fun getSupportedLanguages(): HashMap<String, String> {
@@ -500,6 +543,7 @@ private fun getMessagesForLanguage(
         val message =  messagesFromJson.getJSONObject(i)
         // TODO: image support
         if (message.getString("messageType") != "text") {
+            println("Image:\n$message")
             continue
         }
         val parsedMessage = parseMessage(message = message)
@@ -532,12 +576,14 @@ private suspend fun publishMessage(
     userId: UUID,
     currentLanguage: String,
     chatMessage: String,
+    messageType: String = "text"
 ) {
     val tokenExpiresInSecs = tokenExpiresAt - (System.currentTimeMillis() / 1000)
     if (tokenExpiresInSecs < 10) {
         withContext(Dispatchers.IO) {
             topicClient?.close()
-            getTopicClient(userName, userId)
+            cacheClient?.close()
+            getClients(userName, userId)
         }
     }
     val gson = Gson()
@@ -545,7 +591,7 @@ private suspend fun publishMessage(
     val message = ChatMessage(
         timestamp = System.currentTimeMillis(),
         message = chatMessage,
-        messageType = "text",
+        messageType = messageType,
         sourceLanguage = currentLanguage,
         user = user
     )
