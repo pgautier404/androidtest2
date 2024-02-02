@@ -231,8 +231,6 @@ fun ModeratedChatLayout(
                                 val tokenExpiresInSecs = tokenExpiresAt - (System.currentTimeMillis() / 1000)
                                 println("token expires in $tokenExpiresInSecs")
                                 if (topicClient == null || tokenExpiresInSecs < 10) {
-                                    topicClient?.close()
-                                    cacheClient?.close()
                                     getClients(userName, userId)
                                 }
                             }
@@ -267,8 +265,6 @@ fun ModeratedChatLayout(
                             val resubscribeAfterSecs = 180L
                             delay(resubscribeAfterSecs * 1000)
                             subscribeJob?.cancelAndJoin()
-                            topicClient?.close()
-                            cacheClient?.close()
                             getClients(userName, userId)
                             print("resubscribing")
                         }
@@ -497,6 +493,9 @@ private fun getClients(
     userName: String,
     userId: UUID
 ) {
+    topicClient?.close()
+    cacheClient?.close()
+
     // TODO: move api token to remember and pass in callback
     getApiToken(userName, userId)
     val credentialProvider =
@@ -581,8 +580,6 @@ private suspend fun publishMessage(
     val tokenExpiresInSecs = tokenExpiresAt - (System.currentTimeMillis() / 1000)
     if (tokenExpiresInSecs < 10) {
         withContext(Dispatchers.IO) {
-            topicClient?.close()
-            cacheClient?.close()
             getClients(userName, userId)
         }
     }
