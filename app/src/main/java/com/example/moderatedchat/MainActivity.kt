@@ -42,6 +42,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import com.example.moderatedchat.ui.theme.ModeratedChatTheme
 import com.google.gson.Gson
 import kotlinx.coroutines.Dispatchers
@@ -58,6 +60,7 @@ import software.momento.kotlin.sdk.TopicClient
 import software.momento.kotlin.sdk.auth.CredentialProvider
 import software.momento.kotlin.sdk.config.Configurations
 import software.momento.kotlin.sdk.config.TopicConfigurations
+import software.momento.kotlin.sdk.responses.cache.GetResponse
 import software.momento.kotlin.sdk.responses.cache.SetResponse
 import software.momento.kotlin.sdk.responses.topic.TopicMessage
 import software.momento.kotlin.sdk.responses.topic.TopicSubscribeResponse
@@ -81,6 +84,7 @@ var topicClient: TopicClient? = null
 var cacheClient: CacheClient? = null
 
 class MainActivity : ComponentActivity() {
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
@@ -171,9 +175,9 @@ fun ModeratedChatLayout(
     var subscribeJob by remember { mutableStateOf<Job?>(null) }
     val focusManager = LocalFocusManager.current
 
+    val context = LocalContext.current
     var imageUri by remember { mutableStateOf<Uri?>(null) }
     var imageBytes by remember { mutableStateOf<ByteArray?>(null) }
-    val context = LocalContext.current
     val imageScope = rememberCoroutineScope()
     val launcher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
@@ -344,7 +348,16 @@ fun MessageList(
         items(items = messages) { item ->
             ChatEntry(
                 currentUserId = currentUserId,
-                message = item
+                message = item,
+//                onLoadMessage = {
+//                    println("onLoadMessage callback firing")
+//                    scope.launch {
+//                        println("onLoadMessage is scrolling")
+//                        if (!lazyColumnListState.isScrollInProgress) {
+//                            lazyColumnListState.scrollToItem(messages.count())
+//                        }
+//                    }
+//                }
             )
         }
     }
@@ -363,6 +376,17 @@ fun ChatEntry(
     }
     val sdf = java.text.SimpleDateFormat("HH:mm a", Locale.US)
     val parsedDate = sdf.format(java.util.Date(message.timestamp))
+    var imageBytes by remember { mutableStateOf<ByteArray?>(null) }
+    LaunchedEffect(message) {
+        if (message.message.startsWith("image-")) {
+            when (val getResponse = cacheClient?.get("moderator", message.message)) {
+                is GetResponse.Error -> println("Error getting image: $getResponse")
+                is GetResponse.Miss -> println("Cache miss g=fetching key ${message.message}")
+                is GetResponse.Hit -> imageBytes = Base64.getDecoder().decode(getResponse.value)
+                null -> println("get null response for image")
+            }
+        }
+    }
     Surface(
         color = color,
         modifier = modifier.padding(vertical = 4.dp, horizontal = 8.dp)
@@ -374,10 +398,25 @@ fun ChatEntry(
                 text = "${message.user.name} - $parsedDate",
                 modifier = modifier
             )
-            Text(
-                text = message.message,
-                modifier = modifier
-            )
+            if (message.messageType == "text") {
+                Text(
+                    text = message.message,
+                    modifier = modifier,
+                )
+            } else {
+                println("rendering image...")
+                if (!message.message.startsWith("image-")) {
+                    imageBytes = Base64.getDecoder().decode(message.message)
+                }
+                val request = ImageRequest.Builder(context = LocalContext.current)
+                    .data(imageBytes)
+                    .build()
+                AsyncImage(
+                    model = request,
+                    contentDescription = null,
+                    modifier = modifier.padding(4.dp),
+                )
+            }
         }
     }
 }
@@ -507,7 +546,7 @@ private fun getClients(
     cacheClient = CacheClient(
         credentialProvider = credentialProvider,
         configuration = Configurations.Laptop.latest,
-        itemDefaultTtl = 30.seconds
+        itemDefaultTtl = (24 * 60 * 60).seconds
     )
     println("got new topic client $topicClient and cache client $cacheClient")
 }
@@ -540,11 +579,6 @@ private fun getMessagesForLanguage(
     val messageList = mutableListOf<ChatMessage>()
     for (i in 0..<messagesFromJson.length()) {
         val message =  messagesFromJson.getJSONObject(i)
-        // TODO: image support
-        if (message.getString("messageType") != "text") {
-            println("Image:\n$message")
-            continue
-        }
         val parsedMessage = parseMessage(message = message)
         messageList.add(parsedMessage)
     }
