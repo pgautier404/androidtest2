@@ -1,11 +1,13 @@
 package com.example.moderatedchat
 
+import android.content.pm.ActivityInfo
 import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -36,11 +38,13 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
@@ -88,6 +92,12 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // TODO: temporarily locking orientation to prevent messages from
+        //  disappearing when it's changed. Remove when message list is
+        //  "rememberSaveable"d
+        this.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+
         setContent {
             ModeratedChatTheme {
                 // A surface container using the 'background' color from the theme
@@ -117,8 +127,8 @@ data class ChatMessage(
 
 @Composable
 fun ModeratedChatApp(modifier: Modifier = Modifier) {
-    var userName by remember { mutableStateOf("") }
-    val userId = UUID.randomUUID()
+    var userName by rememberSaveable { mutableStateOf("") }
+    val userId by rememberSaveable { mutableStateOf(UUID.randomUUID()) }
     if (userName.isBlank()) {
         ModeratedChatLogin(
             {
@@ -141,10 +151,14 @@ fun ModeratedChatLogin(
 ) {
     Column(
         modifier = modifier.fillMaxSize(),
-        verticalArrangement = Arrangement.Center,
+        verticalArrangement = Arrangement.Top,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         var userNameField by remember { mutableStateOf("") }
+        Image(
+            painterResource(id = R.drawable.mochat_mo_peek_up),
+            contentDescription = null
+        )
         Text("Welcome to the Momento Moderated Chat!")
         TextField(
             value = userNameField,
@@ -155,7 +169,7 @@ fun ModeratedChatLogin(
             }
         )
         Button(
-            modifier = Modifier.padding(vertical = 24.dp),
+            modifier = modifier,
             onClick = { onLogin(userNameField) }
         ) {
             Text("Continue")
@@ -169,10 +183,11 @@ fun ModeratedChatLayout(
     userId: UUID,
     modifier: Modifier = Modifier
 ) {
-    var supportedLanguages by remember { mutableStateOf(mapOf("xx" to "Loading...")) }
-    var currentLanguage by remember { mutableStateOf("xx") }
+    var supportedLanguages by rememberSaveable { mutableStateOf(mapOf("xx" to "Loading...")) }
+    var currentLanguage by rememberSaveable { mutableStateOf("xx") }
     val currentMessages = remember { mutableStateListOf<ChatMessage>() }
     var subscribeJob by remember { mutableStateOf<Job?>(null) }
+    var messagesLoaded by remember { mutableStateOf(false) }
 
     Column(
         verticalArrangement = Arrangement.Center,
@@ -199,7 +214,7 @@ fun ModeratedChatLayout(
                                 }
                             }
                         }
-                        if (currentLanguage == newLanguage) {
+                        if (currentLanguage == newLanguage && !messagesLoaded) {
                             println("language $currentLanguage not changed. skipping.")
                             return@withContext
                         }
@@ -211,6 +226,7 @@ fun ModeratedChatLayout(
                                 currentMessages.add(it[i])
                             }
                         }
+                        messagesLoaded = true
                         println("messages refreshed")
                         if (subscribeJob != null) {
                             println("cancelling existing subscribe job")
@@ -358,15 +374,21 @@ fun MessageList(
         state = lazyColumnListState,
         modifier = modifier
     ) {
-        scope.launch {
-            println("scrolling...")
-            lazyColumnListState.scrollToItem(messages.count())
-        }
         items(items = messages) { item ->
             key(item.message) {
                 ChatEntry(
                     currentUserId = currentUserId,
-                    message = item
+                    message = item,
+                    onLoad = {
+                        scope.launch {
+                            if (
+                                !lazyColumnListState.isScrollInProgress
+                                || !lazyColumnListState.canScrollForward
+                            ) {
+                                lazyColumnListState.scrollToItem(messages.count())
+                            }
+                        }
+                    }
                 )
             }
         }
@@ -377,6 +399,7 @@ fun MessageList(
 fun ChatEntry(
     currentUserId: UUID,
     message: ChatMessage,
+    onLoad: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val color = if (currentUserId.toString() == message.user.id) {
@@ -422,6 +445,7 @@ fun ChatEntry(
                 Text(
                     text = message.message,
                     modifier = modifier,
+                    onTextLayout = {onLoad() }
                 )
             } else {
                 println("rendering image...")
@@ -433,6 +457,7 @@ fun ChatEntry(
                     model = request,
                     contentDescription = null,
                     modifier = modifier.padding(4.dp),
+                    onSuccess = { onLoad() }
                 )
             }
         }
