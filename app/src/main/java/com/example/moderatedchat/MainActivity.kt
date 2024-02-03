@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
@@ -394,6 +395,7 @@ fun MessageList(
                                 !lazyColumnListState.isScrollInProgress
                                 || !lazyColumnListState.canScrollForward
                             ) {
+                                println("scrolling to bottom")
                                 lazyColumnListState.scrollToItem(messages.count())
                             }
                         }
@@ -439,7 +441,9 @@ fun ChatEntry(
     }
     Surface(
         color = color,
-        modifier = modifier.padding(vertical = 4.dp, horizontal = 8.dp)
+        shape = RoundedCornerShape(8.dp),
+        modifier = modifier
+            .padding(4.dp)
     ) {
         Column(
             modifier = Modifier
