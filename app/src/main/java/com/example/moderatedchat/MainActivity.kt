@@ -262,8 +262,8 @@ fun ModeratedChatLayout(
             MessageList(
                 currentUserId = userId,
                 messages = currentMessages,
-                listState = lazyColumnListState,
-                onMessagesLoaded = {},
+//                listState = lazyColumnListState,
+//                onMessagesLoaded = {},
                 modifier = Modifier
                     .weight(1f)
                     .padding(4.dp)
