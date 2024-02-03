@@ -253,13 +253,22 @@ fun ModeratedChatLayout(
             },
             modifier = modifier.fillMaxWidth()
         )
-        MessageList(
-            currentUserId = userId,
-            messages = currentMessages,
-            modifier = Modifier
-                .weight(1f)
-                .padding(4.dp)
-        )
+        if (currentMessages.size == 0) {
+            Text(
+                text = "Loading messages . . . ",
+                modifier = modifier.weight(1f)
+            )
+        } else {
+            MessageList(
+                currentUserId = userId,
+                messages = currentMessages,
+                listState = lazyColumnListState,
+                onMessagesLoaded = {},
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(4.dp)
+            )
+        }
         MessageBar(
             userName = userName,
             userId = userId,
