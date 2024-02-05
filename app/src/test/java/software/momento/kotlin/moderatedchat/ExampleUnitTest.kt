@@ -1,4 +1,4 @@
-package com.example.moderatedchat
+package software.momento.kotlin.moderatedchat
 
 import org.junit.Test
 

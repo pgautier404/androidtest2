@@ -4,11 +4,11 @@ plugins {
 }
 
 android {
-    namespace = "com.example.moderatedchat"
+    namespace = "software.momento.kotlin.moderatedchat"
     compileSdk = 34
 
     defaultConfig {
-        applicationId = "com.example.moderatedchat"
+        applicationId = "software.momento.kotlin.moderatedchat"
         minSdk = 26
         targetSdk = 34
         versionCode = 1

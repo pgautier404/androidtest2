@@ -1,4 +1,4 @@
-package com.example.moderatedchat
+package software.momento.kotlin.moderatedchat
 
 import android.content.pm.ActivityInfo
 import android.net.Uri
@@ -50,7 +50,6 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
-import com.example.moderatedchat.ui.theme.ModeratedChatTheme
 import com.google.gson.Gson
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -61,6 +60,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.yield
 import org.json.JSONObject
+import software.momento.kotlin.moderatedchat.ui.theme.ModeratedChatTheme
 import software.momento.kotlin.sdk.CacheClient
 import software.momento.kotlin.sdk.TopicClient
 import software.momento.kotlin.sdk.auth.CredentialProvider

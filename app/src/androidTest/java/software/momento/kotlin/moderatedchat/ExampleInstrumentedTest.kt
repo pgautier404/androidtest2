@@ -1,4 +1,4 @@
-package com.example.moderatedchat
+package software.momento.kotlin.moderatedchat
 
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.ext.junit.runners.AndroidJUnit4
