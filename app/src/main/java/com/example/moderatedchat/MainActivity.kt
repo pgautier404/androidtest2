@@ -85,7 +85,6 @@ import kotlin.time.Duration.Companion.seconds
 const val baseApiUrl = "https://57zovcekn0.execute-api.us-west-2.amazonaws.com/prod"
 var momentoApiToken: String = ""
 var tokenExpiresAt: Long = 0
-// TODO: I really doubt this is right
 var topicClient: TopicClient? = null
 var cacheClient: CacheClient? = null
 
@@ -390,12 +389,12 @@ fun MessageList(
                     currentUserId = currentUserId,
                     message = item,
                     onLoad = {
-                        scope.launch {
-                            if (
-                                !lazyColumnListState.isScrollInProgress
-                                || !lazyColumnListState.canScrollForward
-                            ) {
-                                println("scrolling to bottom")
+                        if (
+                            !lazyColumnListState.isScrollInProgress
+                            || !lazyColumnListState.canScrollForward
+                        ) {
+                            println("scrolling to bottom")
+                            scope.launch {
                                 lazyColumnListState.scrollToItem(messages.count())
                             }
                         }
@@ -458,7 +457,7 @@ fun ChatEntry(
                 Text(
                     text = message.message,
                     modifier = modifier,
-                    onTextLayout = {onLoad() }
+                    onTextLayout = { onLoad() }
                 )
             } else {
                 println("rendering image...")
